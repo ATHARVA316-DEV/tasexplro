@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Grid‑World Path Exploration Visualizer</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      background: #f7f7f7;
+    }
+    #controls {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    #canvas {
+      border: 1px solid #333;
+      background: #fff;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    label {
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <h2>Grid‑World Path Exploration Visualizer</h2>
+
+  <div id="controls">
+    <label>
+      Obstacles:
+      <input id="obsCount" type="number" min="0" max="15" value="5" />
+    </label>
+    <button id="startBtn">Start</button>
+    <span id="status"></span>
+  </div>
+
+  <canvas id="canvas" width="600" height="600"></canvas>
+
+  <script>
+    // ---------- CONFIG ----------
+    const GRID_SIZE = 30;      // N x N cells
+    const CELL      = 20;      // pixel size of each cell (canvas is 600×600)
+    const DIRECTIONS = [       // clockwise: N, E, S, W
+      [0, -1],  // y −1 (north)
+      [1, 0],   // x +1 (east)
+      [0, 1],   // y +1 (south)
+      [-1, 0],  // x −1 (west)
+    ];
+
+    // ---------- Canvas & UI ----------
+    const canvas = document.getElementById("canvas");
+    const ctx    = canvas.getContext("2d");
+    const startBtn = document.getElementById("startBtn");
+    const obsInput = document.getElementById("obsCount");
+    const statusEl = document.getElementById("status");
+
+    // ---------- World state ----------
+    let grid, visited, stack, start, timer, step;
+
+    // Utility helpers
+    const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+    function generateWorld(obstacles) {
+      // 0 = free, 1 = obstacle
+      grid = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
+      const MAX_W = 8, MAX_H = 8, MIN_W = 4, MIN_H = 4;
+      for (let k = 0; k < obstacles; k++) {
+        const w  = randInt(MIN_W, MAX_W);
+        const h  = randInt(MIN_H, MAX_H);
+        const x0 = randInt(0, GRID_SIZE - w - 1);
+        const y0 = randInt(0, GRID_SIZE - h - 1);
+        for (let y = y0; y < y0 + h; y++) {
+          for (let x = x0; x < x0 + w; x++) {
+            grid[y][x] = 1;
+          }
+        }
+      }
+    }
+
+    function placeStart() {
+      let y, x;
+      do {
+        y = randInt(0, GRID_SIZE - 1);
+        x = randInt(0, GRID_SIZE - 1);
+      } while (grid[y][x] === 1);
+      start = { y, x };
+    }
+
+    // DFS stack entry: { y, x, dirIdx }
+    function initExplorer() {
+      visited = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(false));
+      visited[start.y][start.x] = true;
+      stack   = [{ y: start.y, x: start.x, dirIdx: 0 }];
+      step    = 0;
+      draw();
+    }
+
+    function exploreStep() {
+      if (!stack.length) {
+        // done
+        clearInterval(timer);
+        timer = null;
+        startBtn.disabled = false;
+        statusEl.textContent = " Exploration complete ✔️";
+        return;
+      }
+
+      const node = stack[stack.length - 1];
+      let foundNext = false;
+      for (let i = node.dirIdx; i < 4; i++) {
+        const [dx, dy] = DIRECTIONS[i];
+        const ny = node.y + dy;
+        const nx = node.x + dx;
+        if (
+          ny >= 0 && ny < GRID_SIZE &&
+          nx >= 0 && nx < GRID_SIZE &&
+          grid[ny][nx] === 0 &&
+          !visited[ny][nx]
+        ) {
+          // update current node dirIdx so next time we resume at i+1
+          node.dirIdx = i + 1;
+          // push new node
+          visited[ny][nx] = true;
+          stack.push({ y: ny, x: nx, dirIdx: 0 });
+          foundNext = true;
+          break;
+        }
+      }
+
+      if (!foundNext) {
+        // backtrack
+        stack.pop();
+      }
+
+      step++;
+      if (step % 1 === 0) draw();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // grid background (free cells light, obstacles dark)
+      for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          if (grid[y][x] === 1) {
+            ctx.fillStyle = "#222";
+          } else if (visited[y][x]) {
+            ctx.fillStyle = "#bde0fe"; // visited skyblue
+          } else {
+            ctx.fillStyle = "#eee"; // unexplored light grey
+          }
+          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+      }
+
+      // active path (stack)
+      ctx.fillStyle = "#32CD32"; // lime
+      for (let i = 0; i < stack.length; i++) {
+        const { x, y } = stack[i];
+        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      }
+
+      // start/h​ead
+      if (stack.length) {
+        const head = stack[stack.length - 1];
+        ctx.fillStyle = "red";
+        ctx.beginPath();
+        ctx.arc(head.x * CELL + CELL / 2, head.y * CELL + CELL / 2, CELL / 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      statusEl.textContent = `Step: ${step} | Visited: ${visited.flat().filter(Boolean).length}`;
+    }
+
+    function startSimulation() {
+      const obsCount = Math.max(0, Math.min(15, parseInt(obsInput.value) || 0));
+      generateWorld(obsCount);
+      placeStart();
+      initExplorer();
+
+      // run at ~60 fps (16 ms) but you can tweak
+      timer = setInterval(exploreStep, 60);
+      startBtn.disabled = true;
+      statusEl.textContent = "Exploring…";
+    }
+
+    startBtn.addEventListener("click", startSimulation);
+  </script>
+</body>
+</html>
